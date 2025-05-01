@@ -17,9 +17,14 @@ pipenv install
 
 ## Usage
 
+To activate the virtual environment:
+```bash
+pipenv shell
+```
+
 Run the data transfer service:
 ```bash
-pipenv run python src/main.py
+python3 src/main.py
 ```
 
 The service will:
@@ -43,10 +48,7 @@ The service will:
 
 ## Development
 
-To activate the virtual environment:
-```bash
-pipenv shell
-```
+
 
 To install new dependencies:
 ```bash
