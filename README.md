@@ -17,7 +17,7 @@ pipenv install
 
 ## Usage
 
-To activate the virtual environment:
+To activate the virtual environment(if not already activated):
 ```bash
 pipenv shell
 ```
