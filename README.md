@@ -54,8 +54,3 @@ To install new dependencies:
 ```bash
 pipenv install package_name
 ```
-
-To install development dependencies:
-```bash
-pipenv install package_name --dev
-``` 
