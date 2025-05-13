@@ -74,12 +74,12 @@ class DuneClient:
         # Create SQL INSERT statement
         values = []
         for row in data:
-            value_str = f"('{row['id']}', '{row['from_address']}', '{row['token_in']}', '{row['token_out']}', {row['amount_in']}, {row['amount_out']}, '{row['timestamp']}')"
+            value_str = f"('{row['id']}', '{row['from']}', '{row['token_in']}', '{row['token_out']}', {row['amount_in']}, {row['amount_out']}, '{row['timestamp']}')"
             values.append(value_str)
         
         insert_query = f"""
         INSERT INTO {namespace}.{table_name} 
-        (id, from_address, token_in, token_out, amount_in, amount_out, timestamp)
+        (id, from, token_in, token_out, amount_in, amount_out, timestamp)
         VALUES {','.join(values)}
         """
         
@@ -122,7 +122,7 @@ class DuneClient:
 
     def upload_data(self, namespace, table_name, data, batch_size=None):
         """
-        Upload data to Dune Analytics using CSV format
+        Upload data to Dune Analytics using CSV format with retry logic for rate limits
         :param namespace: Your Dune username
         :param table_name: Name of the table
         :param data: List of dictionaries containing the data to upload
@@ -131,12 +131,35 @@ class DuneClient:
         """
         endpoint = f"{self.base_url}/table/{namespace}/{table_name}/insert"
         
+        # Debug logging for input data
+        print("\nDebug: Data being uploaded to Dune")
+        print(f"Number of records: {len(data)}")
+        if data:
+            print("\nFirst record structure:")
+            print(f"Keys: {data[0].keys()}")
+            print(f"Values: {data[0]}")
+            print("\nSample of first record values:")
+            for key, value in data[0].items():
+                print(f"{key}: {value} (type: {type(value)})")
+        
+        # Validate data structure
+        required_fields = ['id', 'from', 'token_in', 'token_out', 'amount_in', 'amount_out', 'timestamp']
+        if data and not all(field in data[0] for field in required_fields):
+            missing_fields = [field for field in required_fields if field not in data[0]]
+            print(f"Error: Missing required fields in data: {missing_fields}")
+            return None
+        
         # Create CSV in memory
         output = io.StringIO()
         if data:
             writer = csv.DictWriter(output, fieldnames=data[0].keys())
             writer.writeheader()
             writer.writerows(data)
+        
+        # Debug logging for CSV data
+        csv_data = output.getvalue()
+        print("\nDebug: First 500 characters of CSV data:")
+        print(csv_data[:500])
         
         # Update headers for CSV upload
         headers = {
@@ -147,13 +170,13 @@ class DuneClient:
         try:
             # Use provided batch_size or fall back to the one from .env
             chunk_size = batch_size if batch_size is not None else self.batch_size
-            print(f"Dune upload using chunk_size: {chunk_size} (batch_size param: {batch_size}, env batch_size: {self.batch_size})")
+            print(f"\nDune upload using chunk_size: {chunk_size}")
             total_records = len(data)
             results = []
             
             for i in range(0, total_records, chunk_size):
                 chunk = data[i:i + chunk_size]
-                print(f"Uploading chunk {i//chunk_size + 1} of {(total_records-1)//chunk_size + 1} ({len(chunk)} records)...")
+                print(f"\nUploading chunk {i//chunk_size + 1} of {(total_records-1)//chunk_size + 1} ({len(chunk)} records)...")
                 
                 # Create CSV for this chunk
                 chunk_output = io.StringIO()
@@ -161,14 +184,46 @@ class DuneClient:
                 writer.writeheader()
                 writer.writerows(chunk)
                 
-                response = self.session.post(
-                    endpoint,
-                    headers=headers,
-                    data=chunk_output.getvalue().encode('utf-8'),
-                    timeout=120  # 120 second timeout for larger chunks
-                )
-                response.raise_for_status()
-                results.append(response.json())
+                chunk_csv = chunk_output.getvalue()
+                print(f"Chunk CSV preview (first 200 chars):\n{chunk_csv[:200]}")
+                
+                # Retry logic for rate limits
+                max_retries = 5  # Maximum number of retries
+                base_delay = 5  # Base delay in seconds
+                retry_count = 0
+                success = False
+                
+                while not success and retry_count < max_retries:
+                    try:
+                        response = self.session.post(
+                            endpoint,
+                            headers=headers,
+                            data=chunk_csv.encode('utf-8'),
+                            timeout=120  # 120 second timeout for larger chunks
+                        )
+                        
+                        if response.status_code == 200:
+                            success = True
+                            results.append(response.json())
+                            print(f"Successfully uploaded chunk {i//chunk_size + 1}")
+                        else:
+                            response.raise_for_status()
+                            
+                    except requests.exceptions.RequestException as e:
+                        error_message = str(e)
+                        if "too many requests" in error_message.lower():
+                            retry_count += 1
+                            if retry_count < max_retries:
+                                # Calculate exponential backoff delay
+                                delay = base_delay * (2 ** (retry_count - 1))
+                                print(f"Rate limit hit. Retrying in {delay} seconds... (Attempt {retry_count + 1}/{max_retries})")
+                                time.sleep(delay)
+                            else:
+                                print(f"Max retries reached for chunk {i//chunk_size + 1}. Moving to next chunk.")
+                                break
+                        else:
+                            print(f"Error uploading chunk {i//chunk_size + 1}: {e}")
+                            break
                 
                 # Add a small delay between chunks to avoid rate limiting
                 if i + chunk_size < total_records:
@@ -176,7 +231,9 @@ class DuneClient:
             
             return results
         except requests.exceptions.RequestException as e:
-            print(f"Error uploading data to Dune: {e}")
+            print(f"\nError uploading data to Dune: {e}")
+            if hasattr(e.response, 'text'):
+                print(f"Error response: {e.response.text}")
             return None
 
     def delete_table(self, namespace, table_name):
@@ -240,7 +297,6 @@ class DuneClient:
         }
         
         try:
-            print(f"Executing query to get latest transaction data from {namespace}.{table_name}")
             response = self.session.post(
                 endpoint,
                 headers=self.headers,
@@ -249,12 +305,14 @@ class DuneClient:
             )
             response.raise_for_status()
             result = response.json()
-            latest_id = result.get('latest_id')
-            latest_timestamp = result.get('latest_timestamp')
-            print(f"Query result: {result}")
-            print(f"Latest transaction hash: {latest_id}")
-            print(f"Latest timestamp: {latest_timestamp}")
-            return latest_id, latest_timestamp
+            
+            # Extract results from the response
+            if 'result' in result and 'rows' in result['result'] and result['result']['rows']:
+                row = result['result']['rows'][0]
+                latest_id = row.get('latest_id')
+                latest_timestamp = row.get('latest_timestamp')
+                return latest_id, latest_timestamp
+            return None, None
         except requests.exceptions.RequestException as e:
             print(f"Error getting latest transaction data from Dune: {e}")
             return None, None 

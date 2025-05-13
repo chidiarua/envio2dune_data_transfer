@@ -1,29 +1,52 @@
 from datetime import datetime
 
 class DataTransformer:
-    @staticmethod
-    def transform_swaps(swaps):
+    def transform_swaps(self, swaps):
         """
         Transform swap data from Envio format to Dune format
-        :param swaps: List of swap dictionaries from Envio
-        :return: List of transformed swap dictionaries for Dune
+        swaps: List of swap dictionaries from Envio
+        return: List of transformed swap dictionaries
         """
-        transformed_data = []
+        print("\nDebug: Data Transformer")
+        print(f"Number of swaps received: {len(swaps) if swaps else 0}")
         
+        if not swaps:
+            print("No swaps to transform")
+            return []
+            
+        print("\nFirst swap from Envio:")
+        print(f"Keys: {swaps[0].keys()}")
+        print(f"Values: {swaps[0]}")
+        
+        transformed_swaps = []
         for swap in swaps:
-            # Convert timestamp to datetime
-            timestamp = datetime.fromtimestamp(int(swap['timeStamp']))
-            
-            transformed_swap = {
-                'id': str(swap['id']),  # Ensure VARCHAR
-                'from': str(swap['from']),  # Ensure VARCHAR
-                'token_in': str(swap['_tokenIn']),  # Ensure VARCHAR
-                'token_out': str(swap['_tokenOut']),  # Ensure VARCHAR
-                'amount_in': float(swap['_amountIn']),  # Convert to DOUBLE
-                'amount_out': float(swap['_amountOut']),  # Convert to DOUBLE
-                'timestamp': timestamp.isoformat()  # TIMESTAMP format
-            }
-            
-            transformed_data.append(transformed_swap)
+            try:
+                # Convert Unix timestamp to ISO format
+                timestamp = int(swap["timeStamp"])
+                iso_timestamp = datetime.fromtimestamp(timestamp).isoformat()
+                
+                transformed_swap = {
+                    "id": swap["id"],
+                    "from": swap["from"],
+                    "token_in": swap["_tokenIn"],
+                    "token_out": swap["_tokenOut"],
+                    "amount_in": float(swap["_amountIn"]),
+                    "amount_out": float(swap["_amountOut"]),
+                    "timestamp": iso_timestamp
+                }
+                transformed_swaps.append(transformed_swap)
+            except KeyError as e:
+                print(f"Error transforming swap: Missing key {e}")
+                print(f"Swap data: {swap}")
+                continue
+            except ValueError as e:
+                print(f"Error converting values: {e}")
+                print(f"Swap data: {swap}")
+                continue
         
-        return transformed_data 
+        print(f"\nTransformed {len(transformed_swaps)} swaps")
+        if transformed_swaps:
+            print("\nFirst transformed swap:")
+            print(transformed_swaps[0])
+            
+        return transformed_swaps 

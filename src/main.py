@@ -5,7 +5,23 @@ import time
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Force reload environment variables
+load_dotenv(override=True)
+
+# Validate environment variables
+required_vars = ['ENVIO_GRAPHQL_URL', 'DUNE_API_KEY', 'DUNE_NAMESPACE']
+missing_vars = [var for var in required_vars if not os.getenv(var)]
+
+if missing_vars:
+    print("Error: Missing required environment variables:")
+    for var in missing_vars:
+        print(f"- {var}")
+    exit(1)
+
+print("\nEnvironment variables loaded:")
+print(f"ENVIO_GRAPHQL_URL: {os.getenv('ENVIO_GRAPHQL_URL')}")
+print(f"DUNE_NAMESPACE: {os.getenv('DUNE_NAMESPACE')}")
+print(f"BATCH_SIZE: {os.getenv('BATCH_SIZE')}")
 
 def main():
     envio_client = EnvioClient()
@@ -144,19 +160,21 @@ def main():
             print(f"First transformed ID: {transformed_data[0]['id']}, Last transformed ID: {transformed_data[-1]['id']}")
         
         # Upload to Dune using SQL INSERT
-        print(f"Uploading {len(transformed_data)} records to Dune with batch_size: {BATCH_SIZE}")
+        # Use the actual number of records as the batch size since we've already filtered them
+        actual_batch_size = len(transformed_data)
+        print(f"Uploading {actual_batch_size} records to Dune")
         result = dune_client.upload_data(
             namespace=DUNE_NAMESPACE,
             table_name=DUNE_TABLE_NAME,
             data=transformed_data,
-            batch_size=BATCH_SIZE
+            batch_size=actual_batch_size  # Use actual number of records as batch size
         )
         
         if result:
-            print(f"Successfully uploaded {len(transformed_data)} swaps to Dune")
-            # Update offset by batch size for next iteration
+            print(f"Successfully uploaded {actual_batch_size} swaps to Dune")
+            # Update offset by the original BATCH_SIZE for next iteration
             offset += BATCH_SIZE
-            print(f"Updated offset to: {offset} (incremented by batch size)")
+            print(f"Updated offset to: {offset} (incremented by original batch size)")
         else:
             print("Failed to upload data to Dune")
             time.sleep(RETRY_DELAY)  # Wait before retrying
